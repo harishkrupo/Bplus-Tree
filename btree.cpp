@@ -1,8 +1,8 @@
 #include "btree.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <stdbool.h>
+#include <iostream>
+#include <cstdlib>
 #include <assert.h>
+#include <vector>
 
 #define ZALLOC1(type) calloc(1, sizeof(type))
 #define ZALLOC(n, type) calloc(n, sizeof(type))
@@ -37,9 +37,9 @@ struct BTree {
 struct BTree *
 BTree_create(int treeorder)
 {
-	struct BTree *tree = ZALLOC1(struct BTree);
+	struct BTree *tree = (struct BTree *) ZALLOC1(struct BTree);
 	tree->treeorder = treeorder;
-	tree->root = ZALLOC1(struct BTreeLeafNode);
+	tree->root = (struct BTreeNode *) ZALLOC1(struct BTreeLeafNode);
 	tree->root->type = BTREE_NODE_TYPE_LEAF;
 	tree->root->parent = NULL;
 	return tree;
@@ -91,8 +91,8 @@ BTreeLeafNode_search(struct BTreeNode *node, long key)
 
 	assert(node->type == BTREE_NODE_TYPE_LEAF);
 
-	loc = bsearch(&key, node->keys, node->nkeys,
-		      sizeof(long), key_comparator);
+	loc = (long *) bsearch(&key, node->keys, node->nkeys,
+			       sizeof(long), key_comparator);
 
 	if (loc)
 		ret = loc - node->keys;
@@ -128,11 +128,11 @@ BTreeLeafNode_create(int capacity, struct BTreeNode *parent)
 	struct BTreeLeafNode *new_leaf = NULL;
 	struct BTreeNode *new_node = NULL;
 
-	new_leaf = ZALLOC1(struct BTreeLeafNode);
-	new_leaf->data = ZALLOC(capacity, *new_leaf->data);
+	new_leaf = (struct BTreeLeafNode *) ZALLOC1(struct BTreeLeafNode);
+	new_leaf->data = (void **) ZALLOC(capacity, *new_leaf->data);
 	new_node = (struct BTreeNode *) new_leaf;
 	new_node->nkeys = 0;
-	new_node->keys = ZALLOC(capacity, *new_node->keys);
+	new_node->keys = (long *) ZALLOC(capacity, *new_node->keys);
 	new_node->type = BTREE_NODE_TYPE_LEAF;
 	new_node->parent = parent;
 
@@ -220,11 +220,13 @@ BTreeInternalNode_create(int capacity, struct BTreeNode *parent)
 	struct BTreeInternalNode *new_internal = NULL;
 	struct BTreeNode *new_node = NULL;
 
-	new_internal = ZALLOC1(struct BTreeLeafNode);
-	new_internal->children = ZALLOC(capacity + 1, *new_internal->children);
+	new_internal =
+		(struct BTreeInternalNode *) ZALLOC1(struct BTreeInternalNode);
+	new_internal->children =
+		(struct BTreeNode **) ZALLOC(capacity + 1, *new_internal->children);
 	new_node = (struct BTreeNode *) new_internal;
 	new_node->nkeys = 0;
-	new_node->keys = ZALLOC(capacity, *new_node->keys);
+	new_node->keys = (long *) ZALLOC(capacity, *new_node->keys);
 	new_node->type = BTREE_NODE_TYPE_INTERNAL;
 	new_node->parent = parent;
 

@@ -12,4 +12,10 @@ struct BTree *
 BTree_create(int treeorder);
 void
 BTree_destroy(struct BTree *);
+void *
+BTree_search(struct BTree *tree, long key);
+int
+BTree_insert(struct BTree *tree, long key, void *data);
+void
+BTree_print(struct Btree *tree);
 #endif //_BTREE_H_
