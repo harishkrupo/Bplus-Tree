@@ -1,0 +1,1 @@
+project('bptree', 'c')
