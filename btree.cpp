@@ -235,28 +235,70 @@ BTreeInternalNode_create(int capacity, struct BTreeNode *parent)
 }
 
 /**
- * Insert a key into an internal node
- * returns a new node if one was created
+ * Inserts into node in sorted order when node->nkeys < capacity
  */
-static struct BTreeNode *
-BTreeInternalNode_insert(struct BTreeNode *node, long key,
+
+static void
+BTreeInternalNode_insert_not_full(struct BTreeInternalNode *internal, long key,
+				  struct BTreeNode *left,
+				  struct BTreeNode *right)
+{
+	struct BTreeNode *node = (struct BTreeNode *) internal;
+	int pos = -1;
+	long replaced_key;
+	struct BTreeNode *replaced_child = NULL;
+
+	// Could be done in a single loop, but seems cleaner this way
+
+	// We still have space to insert
+	// go throught all the children pointers to find the one
+	// same as left
+	for (int i = 0; i <= node->nkeys; i++) {
+		if (internal->children[i] == left) {
+			pos = i;
+			break;
+		}
+	}
+	// pos must be +ve otherwise something is really wrong
+	assert(pos > 0);
+
+	for (int i = pos; i < (node->nkeys + 1); i++) {
+		replaced_key = node->keys[i];
+		node->keys[i] = key;
+		key = replaced_key;
+
+		replaced_child = internal->children[i + 1];
+		internal->children[i + 1] = right;
+		right = replaced_child;
+
+		// we could have moved to a new node, so update child's parent
+		internal->children[i + 1]->parent = node;
+	}
+
+	node->nkeys += 1;
+}
+
+/**
+ * Insert a key into an internal node.
+ */
+static void
+BTreeInternalNode_insert(struct BTreeInternalNode *internal, long key,
 			 struct BTreeNode *left, struct BTreeNode *right,
 			 int treeorder)
 {
-	struct BTreeNode *new_node = NULL;
-	struct BTreeInternalNode *internal = (struct BTreeInternalNode *) node;
-	struct BTreeInternalNode *new_internal = NULL;
 	int capacity = (2 * treeorder - 1);
-	long displaced_key;
-	struct BTreeNode *displaced_child = NULL;
+	struct BTreeNode *node = (struct BTreeNode *) internal;
+	struct BTreeInternalNode *new_internal = NULL;
+	struct BTreeNode *new_node = NULL;
 	int mid = capacity / 2;
-	int count = 0;
-	int pos = -1;
+	long key_to_move_up;
+	int new_nkeys = 0;
+	struct BTreeInternalNode *insertion_internal = NULL;
 
 	// Special case when node is NULL. Possible when splitting the root,
-	// whose parent is NULL. In this case just create an internal node and
-	// place the node in the first poisition, set right and left properly
-	// and return
+	// whose parent is NULL.
+	// In this case just create an internal node and place the node in the
+	// first poisition, set right and left properly and return
 	if (!node) {
 		new_internal = BTreeInternalNode_create(capacity, NULL);
 		new_node = (struct BTreeNode *) new_internal;
@@ -267,73 +309,54 @@ BTreeInternalNode_insert(struct BTreeNode *node, long key,
 		new_node->nkeys = 1;
 		left->parent = new_node;
 		right->parent = new_node;
-		return NULL;
+
+		return;
 	}
 
-	// go throught all the children pointers to find the one same as left
-	for (int i = 0; i <= node->nkeys; i++) {
-		if (internal->children[i] == left) {
-			pos = i;
-			break;
-		}
-	}
-
-	// if pos is -ve, something is really wrong
-	assert(pos > 0);
-
-	// pos represents the child pointer, pos can be capacity whereas we can
-	// have only capacity-1 indices for keys. pos == capacity indicates that
-	// the node needs to be split.
-	if (pos < capacity) {
-		// Place the key at pos and remember that key and its right child
-		displaced_key = node->keys[pos];
-		displaced_child = internal->children[pos + 1];
-		node->keys[pos] = key;
-		internal->children[pos + 1] = right;
-
-		// Now start moving the displaced node one by one
-		for (int i = pos + 1; i < node->nkeys; i++) {
-			key = node->keys[i];
-			right = internal->children[i + 1];
-			node->keys[i] = displaced_key;
-			internal->children[i + 1] = displaced_child;
-			displaced_key = key;
-			displaced_child = right;
-		}
-	}
-
-	// need to write one more, check capacity before writing
-	if (node->nkeys + 1 <= capacity) {
-		node->keys[node->nkeys] = key;
-		internal->children[node->nkeys + 1] = right;
-		node->nkeys += 1;
+	if (node->nkeys < capacity) {
+		BTreeInternalNode_insert_not_full(internal, key, left, right);
 	} else {
+		// We dont have space, first split the node and then insert
+		// at the right place
+
+		// Split routine
+		key_to_move_up = node->keys[mid];
+
 		new_internal = BTreeInternalNode_create(capacity, node->parent);
 		new_node = (struct BTreeNode *) new_internal;
 
-		count = 0;
+		// copy key, copy child and update child's parent
 		for (int i = mid + 1; i < node->nkeys; i++) {
-			new_node->keys[count] = node->keys[i];
-			new_internal->children[count] = internal->children[i];
-
-			//update the parent of the child node accordingly
-			internal->children[i]->parent = new_node;
-
-			count++;
+			new_node->keys[new_nkeys] = node->keys[i];
+			new_internal->children[new_nkeys] = internal->children[i];
+			new_internal->children[new_nkeys]->parent = new_node;
+			new_nkeys += 1;
 		}
 
-		// key, right were meant to be written last after displacement
-		new_node->keys[count] = key;
-		new_internal->children[count] = right;
-		count++;
+		// copy the last child and update its parent
+		new_internal->children[new_nkeys] =
+			internal->children[node->nkeys];
+		new_internal->children[new_nkeys]->parent = new_node;
 
-		new_node->nkeys = count;
-		node->nkeys = mid + 1;
+		// update the sizes
+		new_node->nkeys = new_nkeys;
+		node->nkeys = mid;
+
+
+		// Key and child insertion routine
+		if (key > key_to_move_up)
+			insertion_internal = new_internal;
+		else
+			insertion_internal = internal;
+
+		BTreeInternalNode_insert_not_full(insertion_internal,
+						  key, left, right);
+
+		// XXX/TODO Recursion! convert this to an interative algorithm
+		BTreeInternalNode_insert((struct BTreeInternalNode *)node->parent,
+					 key_to_move_up, node, new_node, treeorder);
 	}
-
-	return new_node;
 }
-
 
 int
 BTree_insert(struct BTree *tree, long key, void *data) {
@@ -352,15 +375,13 @@ BTree_insert(struct BTree *tree, long key, void *data) {
 
 	new_node = BTreeLeafNode_insert(node, key, data, tree->treeorder);
 
-	// We have just added a new node, need to balance the tree
-	// till the tree is fully balanced
-	// node's (the old node) right most key is the key to be inserted
-	while(new_node) {
-		new_node = BTreeInternalNode_insert(node->parent,
-						    node->keys[node->nkeys - 1],
-						    node, new_node,
-						    tree->treeorder);
-	}
+	// Insertion into the leaf could split the leaf and create a new leaf
+	// Insert that leaf's last key up, into the tree
+	if (new_node)
+		BTreeInternalNode_insert((struct BTreeInternalNode *) node->parent,
+					 node->keys[node->nkeys - 1],
+					 node, new_node,
+					 tree->treeorder);
 
 	// During the balancing step, a new root could have been created, which
 	// is the parent to the current root that we hold. If root's parent is
