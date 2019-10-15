@@ -1,8 +1,10 @@
 #include "btree.h"
+#include <cstdio>
 #include <iostream>
 #include <cstdlib>
 #include <assert.h>
-#include <vector>
+#include <stack>
+#include <sstream>
 
 #define ZALLOC1(type) calloc(1, sizeof(type))
 #define ZALLOC(n, type) calloc(n, sizeof(type))
@@ -340,4 +342,62 @@ BTree_insert(struct BTree *tree, long key, void *data) {
 	tree->root = root->parent;
 
 	return BTREE_RETURN_SUCCESS;
+}
+
+std::string
+BTree_print(struct BTree *tree)
+{
+	std::stack<BTreeNode *> node_stack;
+	std::stack<long *> key_stack;
+	std::stringstream ss;
+	struct BTreeNode *root = tree->root;
+	struct BTreeNode *node = root;
+	struct BTreeInternalNode *internal = NULL;
+
+	node_stack.push(node);
+
+	while(!node_stack.empty()) {
+		node = node_stack.top();
+		node_stack.pop();
+		if (!node) {
+			long *key = key_stack.top();
+			key_stack.pop();
+
+			if (!key)
+				ss << ")";
+			else
+				ss << " " << std::to_string(*key) << " ";
+
+			continue;
+		}
+
+		// Push NULLs to place a ')'
+		node_stack.push(NULL);
+		key_stack.push(NULL);
+
+		ss << "(";
+
+		if (node->type == BTREE_NODE_TYPE_INTERNAL) {
+			for (int i = node->nkeys - 1 ; i > -1; i--) {
+				internal = (struct BTreeInternalNode *) node;
+				node_stack.push(internal->children[i + 1]);
+				node_stack.push(NULL);
+
+				key_stack.push(&node->keys[i]);
+			}
+
+			// Still need to push the first child
+			node_stack.push(internal->children[0]);
+
+		} else {
+			std::string seperator = "";
+			for (int i = 0; i < node->nkeys; i++) {
+				ss << seperator << std::to_string(node->keys[i]);
+				seperator = " ";
+			}
+		}
+	}
+
+
+	return ss.str();
 }

@@ -1,6 +1,8 @@
 #ifndef _BTREE_H_
 #define _BTREE_H_
 
+#include <iostream>
+
 struct BTree;
 
 enum BTREE_RETURN {
@@ -16,6 +18,6 @@ void *
 BTree_search(struct BTree *tree, long key);
 int
 BTree_insert(struct BTree *tree, long key, void *data);
-void
-BTree_print(struct Btree *tree);
+std::string
+BTree_print(struct BTree *tree);
 #endif //_BTREE_H_
