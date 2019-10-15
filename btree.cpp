@@ -144,10 +144,10 @@ BTree_search(struct BTree *tree, long key)
  * Inserts key into the node and returns a key if we need push it up
  */
 static struct BTreeNode *
-BTreeLeafNode_insert(struct BTreeNode *node, long key,
+BTreeLeafNode_insert(struct BTreeLeafNode *leaf, long key,
 		     void *data, int treeorder)
 {
-	struct BTreeLeafNode *leaf = (struct BTreeLeafNode *) node;
+	struct BTreeNode *node = (struct BTreeNode *) leaf;
 	struct BTreeLeafNode *new_leaf = NULL;
 	struct BTreeNode *new_node = NULL;
 	int capacity = (2 * treeorder - 1);
@@ -373,7 +373,8 @@ BTree_insert(struct BTree *tree, long key, void *data) {
 	if (index > -1)
 		return BTREE_RETURN_KEY_PRESENT;
 
-	new_node = BTreeLeafNode_insert(node, key, data, tree->treeorder);
+	new_node = BTreeLeafNode_insert((struct BTreeLeafNode *)node, key,
+					data, tree->treeorder);
 
 	// Insertion into the leaf could split the leaf and create a new leaf
 	// Insert that leaf's last key up, into the tree
