@@ -34,14 +34,30 @@ struct BTree {
 	struct BTreeNode *root;
 };
 
+static struct BTreeLeafNode *
+BTreeLeafNode_create(int capacity, struct BTreeNode *parent)
+{
+	struct BTreeLeafNode *new_leaf = NULL;
+	struct BTreeNode *new_node = NULL;
+
+	new_leaf = (struct BTreeLeafNode *) ZALLOC1(struct BTreeLeafNode);
+	new_leaf->data = (void **) ZALLOC(capacity, *new_leaf->data);
+	new_node = (struct BTreeNode *) new_leaf;
+	new_node->nkeys = 0;
+	new_node->keys = (long *) ZALLOC(capacity, *new_node->keys);
+	new_node->type = BTREE_NODE_TYPE_LEAF;
+	new_node->parent = parent;
+
+	return new_leaf;
+}
+
 struct BTree *
 BTree_create(int treeorder)
 {
+	int capacity = (2 * treeorder - 1);
 	struct BTree *tree = (struct BTree *) ZALLOC1(struct BTree);
 	tree->treeorder = treeorder;
-	tree->root = (struct BTreeNode *) ZALLOC1(struct BTreeLeafNode);
-	tree->root->type = BTREE_NODE_TYPE_LEAF;
-	tree->root->parent = NULL;
+	tree->root = (struct BTreeNode *) BTreeLeafNode_create(capacity, NULL);
 	return tree;
 }
 
@@ -120,23 +136,6 @@ BTree_search(struct BTree *tree, long key)
 	}
 
 	return data;
-}
-
-static struct BTreeLeafNode *
-BTreeLeafNode_create(int capacity, struct BTreeNode *parent)
-{
-	struct BTreeLeafNode *new_leaf = NULL;
-	struct BTreeNode *new_node = NULL;
-
-	new_leaf = (struct BTreeLeafNode *) ZALLOC1(struct BTreeLeafNode);
-	new_leaf->data = (void **) ZALLOC(capacity, *new_leaf->data);
-	new_node = (struct BTreeNode *) new_leaf;
-	new_node->nkeys = 0;
-	new_node->keys = (long *) ZALLOC(capacity, *new_node->keys);
-	new_node->type = BTREE_NODE_TYPE_LEAF;
-	new_node->parent = parent;
-
-	return new_leaf;
 }
 
 /**
