@@ -36,6 +36,19 @@ struct BTree {
 	struct BTreeNode *root;
 };
 
+/*
+ * Initializes the node, returns -1 on failure
+ */
+static int
+BTreeNode_initialize(struct BTreeNode *node, enum BTREE_NODE_TYPE type,
+		     struct BTreeNode *parent, int capacity) {
+	node->nkeys = 0;
+	node->keys = (long *) ZALLOC(capacity, *node->keys);
+	node->type = type;
+	node->parent = parent;
+	return 0;
+}
+
 static struct BTreeLeafNode *
 BTreeLeafNode_create(int capacity, struct BTreeNode *parent)
 {
@@ -45,11 +58,7 @@ BTreeLeafNode_create(int capacity, struct BTreeNode *parent)
 	new_leaf = (struct BTreeLeafNode *) ZALLOC1(struct BTreeLeafNode);
 	new_leaf->data = (void **) ZALLOC(capacity, *new_leaf->data);
 	new_node = (struct BTreeNode *) new_leaf;
-	new_node->nkeys = 0;
-	new_node->keys = (long *) ZALLOC(capacity, *new_node->keys);
-	new_node->type = BTREE_NODE_TYPE_LEAF;
-	new_node->parent = parent;
-
+	BTreeNode_initialize(new_node, BTREE_NODE_TYPE_LEAF, parent, capacity);
 	return new_leaf;
 }
 
@@ -226,10 +235,8 @@ BTreeInternalNode_create(int capacity, struct BTreeNode *parent)
 	new_internal->children =
 		(struct BTreeNode **) ZALLOC(capacity + 1, *new_internal->children);
 	new_node = (struct BTreeNode *) new_internal;
-	new_node->nkeys = 0;
-	new_node->keys = (long *) ZALLOC(capacity, *new_node->keys);
-	new_node->type = BTREE_NODE_TYPE_INTERNAL;
-	new_node->parent = parent;
+	BTreeNode_initialize(new_node, BTREE_NODE_TYPE_INTERNAL,
+			     parent, capacity);
 
 	return new_internal;
 }
