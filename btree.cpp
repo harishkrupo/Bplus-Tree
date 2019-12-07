@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <stack>
 #include <sstream>
+#include <pthread.h>
 
 #define ZALLOC1(type) calloc(1, sizeof(type))
 #define ZALLOC(n, type) calloc(n, sizeof(type))
@@ -19,6 +20,8 @@ struct BTreeNode {
 	long *keys;
 	int nkeys;
 	struct BTreeNode *parent;
+	pthread_mutex_t s_lock, x_lock;
+	int shared_count;
 };
 
 struct BTreeLeafNode {
@@ -36,16 +39,53 @@ struct BTree {
 	struct BTreeNode *root;
 };
 
+static void
+BTreeNode_acquire_shared_lock(struct BTreeNode *node) {
+	pthread_mutex_lock(&node->s_lock);
+	node->shared_count += 1;
+	if (node->shared_count == 1)
+		pthread_mutex_lock(&node->x_lock);
+	pthread_mutex_unlock(&node->s_lock);
+}
+
+static void
+BTreeNode_release_shared_lock(struct BTreeNode *node) {
+	pthread_mutex_lock(&node->s_lock);
+	node->shared_count -= 1;
+	if (node->shared_count == 0)
+		pthread_mutex_unlock(&node->x_lock);
+	pthread_mutex_unlock(&node->s_lock);
+}
+
+static inline void
+BTreeNode_acquire_exclusive_lock(struct BTreeNode *node) {
+	pthread_mutex_lock(&node->x_lock);
+}
+
+static inline void
+BTreeNode_release_exclusive_lock(struct BTreeNode *node) {
+	pthread_mutex_unlock(&node->x_lock);
+}
+
 /*
  * Initializes the node, returns -1 on failure
  */
 static int
 BTreeNode_initialize(struct BTreeNode *node, enum BTREE_NODE_TYPE type,
 		     struct BTreeNode *parent, int capacity) {
+	pthread_mutexattr_t mattr;
+
+	pthread_mutexattr_init(&mattr);
+	pthread_mutexattr_settype(&mattr, PTHREAD_MUTEX_ERRORCHECK);
 	node->nkeys = 0;
 	node->keys = (long *) ZALLOC(capacity, *node->keys);
 	node->type = type;
 	node->parent = parent;
+	pthread_mutex_init(&node->s_lock, &mattr);
+	pthread_mutex_init(&node->x_lock, &mattr);
+	node->shared_count = 0;
+
+	pthread_mutexattr_destroy(&mattr);
 	return 0;
 }
 
