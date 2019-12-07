@@ -183,29 +183,31 @@ BTreeLeafNode_search(struct BTreeNode *node, long key)
 	return ret;
 }
 
-void *
-BTree_search(struct BTree *tree, long key)
+int
+BTree_search(struct BTree *tree, long key, void **data)
 {
 	struct BTreeNode *root = tree->root;
 	struct BTreeNode *node = NULL;
 	struct BTreeLeafNode *leaf = NULL;
-	void *data = NULL;
 	int index;
+	int ret = 0;
 
 	node = BTreeNode_search(root, key, 0, NULL, 0);
 
 	index = BTreeLeafNode_search(node, key);
 
 	if (index == -1) {
-		data = NULL;
+		*data = NULL;
+		ret = BTREE_RETURN_KEY_NOT_PRESENT;
 	} else {
 		leaf = (struct BTreeLeafNode *) node;
-		data = leaf->data[index];
+		*data = leaf->data[index];
+		ret = BTREE_RETURN_SUCCESS;
 	}
 
 	BTreeNode_release_shared_lock(node);
 
-	return data;
+	return ret;
 }
 
 /**
