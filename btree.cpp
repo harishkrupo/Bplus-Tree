@@ -39,6 +39,8 @@ struct BTree {
 	struct BTreeNode *root;
 };
 
+typedef int (*lock_release_test_fn) (struct BTreeNode *node, int capacity);
+
 static void
 BTreeNode_acquire_shared_lock(struct BTreeNode *node) {
 	pthread_mutex_lock(&node->s_lock);
@@ -114,14 +116,27 @@ BTree_create(int treeorder)
 
 // Returns the node which contains the key or could potentialy hold that key
 static struct BTreeNode *
-BTreeNode_search(struct BTreeNode *root, long key) {
+BTreeNode_search(struct BTreeNode *root, long key, int exclusive_lock,
+		 lock_release_test_fn release_parent_lock, int treeorder) {
 	struct BTreeNode *node = root;
+	struct BTreeNode *parent = NULL;
 	struct BTreeInternalNode *int_node = NULL;
 	bool found = false;
 
 	// See if we can just do rightmost of left subtree
 	while(node->type != BTREE_NODE_TYPE_LEAF) {
 		found = false;
+		if (exclusive_lock) {
+			BTreeNode_acquire_exclusive_lock(node);
+			if (parent && release_parent_lock(node, treeorder))
+				BTreeNode_release_exclusive_lock(parent);
+		} else {
+			BTreeNode_acquire_shared_lock(node);
+			if (parent)
+				BTreeNode_release_shared_lock(parent);
+		}
+
+		parent = node;
 		for (int i = 0; i < node->nkeys; i++) {
 			if (key <= node->keys[i]) {
 				found = true;
@@ -149,6 +164,7 @@ key_comparator(const void *a, const void *b)
 
 /**
  * Returns index of the key if present or -1 if it isn't present
+ * Lock Needs to be taken by the caller
  */
 static int
 BTreeLeafNode_search(struct BTreeNode *node, long key)
@@ -176,7 +192,8 @@ BTree_search(struct BTree *tree, long key)
 	void *data = NULL;
 	int index;
 
-	node = BTreeNode_search(root, key);
+	node = BTreeNode_search(root, key, 0, NULL, 0);
+
 	index = BTreeLeafNode_search(node, key);
 
 	if (index == -1) {
@@ -185,6 +202,8 @@ BTree_search(struct BTree *tree, long key)
 		leaf = (struct BTreeLeafNode *) node;
 		data = leaf->data[index];
 	}
+
+	BTreeNode_release_shared_lock(node);
 
 	return data;
 }
@@ -405,6 +424,34 @@ BTreeInternalNode_insert(struct BTreeInternalNode *internal, long key,
 	}
 }
 
+static inline int
+release_parent_exclusive_lock(BTreeNode *node, int treeorder) {
+	int capacity = (2 * treeorder - 1);
+
+	if (node->nkeys < capacity)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * Releases all the previously acquired exclusive locks during insertion
+ */
+static void
+BTreeNode_release_chain_of_exclusive_locks(BTreeNode *node) {
+
+	while(node) {
+		int ret = pthread_mutex_unlock(&node->x_lock);
+		// A non zero return value signifies that the lock was either
+		// previously unlocked or we never locked this mutex
+		// This is a stopping criterion when traversing from leaf to
+		// root node releasing all the acquired locks in the path
+		// if (ret)
+		// 	break;
+		node = node->parent;
+	}
+}
+
 int
 BTree_insert(struct BTree *tree, long key, void *data) {
 	struct BTreeNode *root = tree->root;
@@ -413,12 +460,15 @@ BTree_insert(struct BTree *tree, long key, void *data) {
 	int index;
 
 	// Find potential node for insertion
-	node = BTreeNode_search(root, key);
+	node = BTreeNode_search(root, key, 1,
+				release_parent_exclusive_lock, tree->treeorder);
 
 	// if key is already present, return error
 	index = BTreeLeafNode_search(node, key);
-	if (index > -1)
+	if (index > -1) {
+		BTreeNode_release_chain_of_exclusive_locks(node);
 		return BTREE_RETURN_KEY_PRESENT;
+	}
 
 	new_node = BTreeLeafNode_insert((struct BTreeLeafNode *)node, key,
 					data, tree->treeorder);
@@ -437,6 +487,8 @@ BTree_insert(struct BTree *tree, long key, void *data) {
 	if (root->parent)
 		tree->root = root->parent;
 
+	BTreeNode_release_chain_of_exclusive_locks(node);
+
 	return BTREE_RETURN_SUCCESS;
 }
 
@@ -450,6 +502,7 @@ BTree_print(struct BTree *tree)
 	struct BTreeNode *node = root;
 	struct BTreeInternalNode *internal = NULL;
 
+	BTreeNode_acquire_shared_lock(root);
 	node_stack.push(node);
 
 	while(!node_stack.empty()) {
@@ -494,6 +547,6 @@ BTree_print(struct BTree *tree)
 		}
 	}
 
-
+	BTreeNode_release_shared_lock(root);
 	return ss.str();
 }
