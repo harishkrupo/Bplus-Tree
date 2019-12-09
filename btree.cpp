@@ -6,9 +6,17 @@
 #include <stack>
 #include <sstream>
 #include <pthread.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include "btree_lock.h"
 
 #define ZALLOC1(type) calloc(1, sizeof(type))
 #define ZALLOC(n, type) calloc(n, sizeof(type))
+
+#define LOG(format, ...)						\
+	printf("%d) Thread %ld: " format, __LINE__, syscall(__NR_gettid), ##__VA_ARGS__)
 
 enum BTREE_NODE_TYPE {
 		      BTREE_NODE_TYPE_INTERNAL,
@@ -20,7 +28,7 @@ struct BTreeNode {
 	long *keys;
 	int nkeys;
 	struct BTreeNode *parent;
-	pthread_mutex_t s_lock, x_lock;
+	btree_lock_t s_lock, x_lock;
 	int shared_count;
 };
 
@@ -43,30 +51,50 @@ typedef int (*lock_release_test_fn) (struct BTreeNode *node, int capacity);
 
 static void
 BTreeNode_acquire_shared_lock(struct BTreeNode *node) {
-	pthread_mutex_lock(&node->s_lock);
+	int ret = btree_lock_lock(&node->s_lock);
+	if (!ret)
+		LOG("Failed to acquire shared lock\n");
+
 	node->shared_count += 1;
-	if (node->shared_count == 1)
-		pthread_mutex_lock(&node->x_lock);
-	pthread_mutex_unlock(&node->s_lock);
+	if (node->shared_count == 1) {
+		ret = btree_lock_lock(&node->x_lock);
+		if (!ret)
+			LOG("Failed to acquire exclusive lock\n");
+	}
+	ret = btree_lock_unlock(&node->s_lock);
+	if (!ret)
+		LOG("Failed to release shared lock\n");
 }
 
 static void
 BTreeNode_release_shared_lock(struct BTreeNode *node) {
-	pthread_mutex_lock(&node->s_lock);
+	int ret = btree_lock_lock(&node->s_lock);
+	if (!ret)
+		LOG("Failed to acquire shared lock\n");
+
 	node->shared_count -= 1;
-	if (node->shared_count == 0)
-		pthread_mutex_unlock(&node->x_lock);
-	pthread_mutex_unlock(&node->s_lock);
+	if (node->shared_count == 0) {
+		ret = btree_lock_unlock(&node->x_lock);
+		if (!ret)
+			LOG("Failed to release exclusive lock\n");
+	}
+	ret = btree_lock_unlock(&node->s_lock);
+	if (!ret)
+		LOG("Failed to release shared lock\n");
 }
 
 static inline void
 BTreeNode_acquire_exclusive_lock(struct BTreeNode *node) {
-	pthread_mutex_lock(&node->x_lock);
+	int ret = btree_lock_lock(&node->x_lock);
+	if (!ret)
+		LOG("Failed to acquire exclusive lock\n");
 }
 
 static inline void
 BTreeNode_release_exclusive_lock(struct BTreeNode *node) {
-	pthread_mutex_unlock(&node->x_lock);
+	int ret = btree_lock_unlock(&node->x_lock);
+	if (!ret)
+		LOG("Failed to release exclusive lock\n");
 }
 
 /*
@@ -75,19 +103,14 @@ BTreeNode_release_exclusive_lock(struct BTreeNode *node) {
 static int
 BTreeNode_initialize(struct BTreeNode *node, enum BTREE_NODE_TYPE type,
 		     struct BTreeNode *parent, int capacity) {
-	pthread_mutexattr_t mattr;
-
-	pthread_mutexattr_init(&mattr);
-	pthread_mutexattr_settype(&mattr, PTHREAD_MUTEX_ERRORCHECK);
 	node->nkeys = 0;
 	node->keys = (long *) ZALLOC(capacity, *node->keys);
 	node->type = type;
 	node->parent = parent;
-	pthread_mutex_init(&node->s_lock, &mattr);
-	pthread_mutex_init(&node->x_lock, &mattr);
 	node->shared_count = 0;
+	btree_lock_init(&node->s_lock);
+	btree_lock_init(&node->x_lock);
 
-	pthread_mutexattr_destroy(&mattr);
 	return 0;
 }
 
