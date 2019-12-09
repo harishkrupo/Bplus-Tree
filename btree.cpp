@@ -15,8 +15,15 @@
 #define ZALLOC1(type) calloc(1, sizeof(type))
 #define ZALLOC(n, type) calloc(n, sizeof(type))
 
-#define LOG(format, ...)						\
-	printf("%d) Thread %ld: " format, __LINE__, syscall(__NR_gettid), ##__VA_ARGS__)
+#define LOG(...)							\
+	{								\
+	 char *str1, *str2;						\
+	 asprintf(&str1, __VA_ARGS__);					\
+	 asprintf(&str2, "%d) Thread %ld: ",  __LINE__, syscall(__NR_gettid)); \
+	 printf("%s %s", str1, str2);					\
+	 free(str1);							\
+	 free(str2);							\
+	}
 
 enum BTREE_NODE_TYPE {
 		      BTREE_NODE_TYPE_INTERNAL,
@@ -140,26 +147,37 @@ BTree_create(int treeorder)
 // Returns the node which contains the key or could potentialy hold that key
 static struct BTreeNode *
 BTreeNode_search(struct BTreeNode *root, long key, int exclusive_lock,
-		 lock_release_test_fn release_parent_lock, int treeorder) {
+		 lock_release_test_fn release_parent_lock, int treeorder,
+		 std::stack<BTreeNode *> *locked_nodes) {
 	struct BTreeNode *node = root;
 	struct BTreeNode *parent = NULL;
 	struct BTreeInternalNode *int_node = NULL;
 	bool found = false;
 
 	// See if we can just do rightmost of left subtree
-	while(node->type != BTREE_NODE_TYPE_LEAF) {
+
+	while(true) {
 		found = false;
 		if (exclusive_lock) {
 			BTreeNode_acquire_exclusive_lock(node);
-			if (parent && release_parent_lock(node, treeorder))
-				BTreeNode_release_exclusive_lock(parent);
+			if (parent) {
+				if (release_parent_lock(node, treeorder)) {
+					BTreeNode_release_exclusive_lock(parent);
+				} else {
+					locked_nodes->push(parent);
+				}
+			}
 		} else {
 			BTreeNode_acquire_shared_lock(node);
 			if (parent)
 				BTreeNode_release_shared_lock(parent);
 		}
 
+		if (node->type == BTREE_NODE_TYPE_LEAF)
+			break;
+
 		parent = node;
+
 		for (int i = 0; i < node->nkeys; i++) {
 			if (key <= node->keys[i]) {
 				found = true;
@@ -175,6 +193,11 @@ BTreeNode_search(struct BTreeNode *root, long key, int exclusive_lock,
 			node = int_node->children[node->nkeys];
 		}
 	}
+
+	// The last node is the leaf node and is locked when returning from
+	// this function. The caller must ensure that all the locks are released
+	if (exclusive_lock)
+		locked_nodes->push(node);
 
 	return node;
 }
@@ -215,7 +238,7 @@ BTree_search(struct BTree *tree, long key, void **data)
 	int index;
 	int ret = 0;
 
-	node = BTreeNode_search(root, key, 0, NULL, 0);
+	node = BTreeNode_search(root, key, 0, NULL, 0, NULL);
 
 	index = BTreeLeafNode_search(node, key);
 
@@ -463,17 +486,12 @@ release_parent_exclusive_lock(BTreeNode *node, int treeorder) {
  * Releases all the previously acquired exclusive locks during insertion
  */
 static void
-BTreeNode_release_chain_of_exclusive_locks(BTreeNode *node) {
+BTreeNode_release_chain_of_exclusive_locks(std::stack<BTreeNode *> *locked_nodes) {
 
-	while(node) {
-		int ret = pthread_mutex_unlock(&node->x_lock);
-		// A non zero return value signifies that the lock was either
-		// previously unlocked or we never locked this mutex
-		// This is a stopping criterion when traversing from leaf to
-		// root node releasing all the acquired locks in the path
-		// if (ret)
-		// 	break;
-		node = node->parent;
+	while(!locked_nodes->empty()) {
+		BTreeNode *node = locked_nodes->top();
+		locked_nodes->pop();
+		BTreeNode_release_exclusive_lock(node);
 	}
 }
 
@@ -482,16 +500,18 @@ BTree_insert(struct BTree *tree, long key, void *data) {
 	struct BTreeNode *root = tree->root;
 	struct BTreeNode *node = NULL;
 	struct BTreeNode *new_node = NULL;
+	std::stack<BTreeNode *> locked_nodes;
 	int index;
 
 	// Find potential node for insertion
 	node = BTreeNode_search(root, key, 1,
-				release_parent_exclusive_lock, tree->treeorder);
+				release_parent_exclusive_lock, tree->treeorder,
+				&locked_nodes);
 
 	// if key is already present, return error
 	index = BTreeLeafNode_search(node, key);
 	if (index > -1) {
-		BTreeNode_release_chain_of_exclusive_locks(node);
+		BTreeNode_release_chain_of_exclusive_locks(&locked_nodes);
 		return BTREE_RETURN_KEY_PRESENT;
 	}
 
@@ -512,7 +532,7 @@ BTree_insert(struct BTree *tree, long key, void *data) {
 	if (root->parent)
 		tree->root = root->parent;
 
-	BTreeNode_release_chain_of_exclusive_locks(node);
+	BTreeNode_release_chain_of_exclusive_locks(&locked_nodes);
 
 	return BTREE_RETURN_SUCCESS;
 }
