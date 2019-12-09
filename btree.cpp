@@ -549,6 +549,7 @@ BTree_print(struct BTree *tree)
 		node_stack.push(NULL);
 		key_stack.push(NULL);
 
+		ss << "[" << node << "]";
 		ss << "(";
 
 		if (node->type == BTREE_NODE_TYPE_INTERNAL) {
