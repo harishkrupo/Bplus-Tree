@@ -6,5 +6,6 @@ thread_dep = dependency('threads')
 executable('bplustree',
   'btree.cpp',
   'main.cpp',
+  'btree_lock.cpp',
   dependencies : thread_dep,
   install : true)
